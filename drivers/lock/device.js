@@ -18,114 +18,10 @@ class LockDevice extends Device {
     await super.onOAuth2Init();
   }
 
-  /*
-  | Synchronization functions
-  */
-
-  // Returns settings from given data
-  getSettingsData(data) {
-    const settings = {};
-
-    // Set connected status
-    if (filled(data.isConnected)) {
-      settings.status = data.isConnected
-        ? this.homey.__('connected')
-        : this.homey.__('disconnected');
-
-      if (this.getStoreValue('connected_via_bridge') && data.isConnected) {
-        settings.status = this.homey.__('connectedViaBridge');
-      }
-    }
-
-    if (blank(data.deviceSettings)) {
-      return settings;
-    }
-
-    const device = data.deviceSettings;
-
-    settings.auto_lock_enabled = device.autoLockEnabled || false;
-    settings.button_lock_enabled = device.buttonLockEnabled || false;
-    settings.button_unlock_enabled = device.buttonUnlockEnabled || false;
-    settings.postponed_lock_enabled = device.postponedLockEnabled || false;
-    settings.postponed_lock_delay = device.postponedLockDelay || 10;
-
-    return settings;
-  }
-
-  // Handle sync data
-  async handleSyncData(data) {
-    try {
-      await this.setStore(data);
-      await super.handleSyncData(data);
-    } catch (err) {
-      this.error(err.message);
-      this.setUnavailable(err.message).catch(this.error);
-    }
-  }
-
-  // Set availability
-  async setAvailability(data) {
-    // Disconnected
-    if (filled(data.isConnected) && !data.isConnected) {
-      throw new Error(this.homey.__('state.disconnected'));
-    }
-
-    if (blank(data.state)) return;
-
-    if (data.state === LockState.Uncalibrated) {
-      throw new Error(this.homey.__('state.uncalibrated'));
-    }
-
-    if (data.state === LockState.Calibrating) {
-      throw new Error(this.homey.__('state.calibrating'));
-    }
-
-    if (data.state === LockState.Unknown) {
-      throw new Error(this.homey.__('state.unknown'));
-    }
-
-    if (data.state === LockState.Updating) {
-      throw new Error(this.homey.__('state.updating'));
-    }
-
-    this.setCapabilityValue('locked', data.state === LockState.Locked).catch(this.error);
-  }
-
-  // Set capabilities
-  async setCapabilities(data) {
-    await super.setCapabilities(data);
-
-    // Battery level
-    if (filled(data.batteryLevel)) {
-      this.setCapabilityValue('measure_battery', data.batteryLevel).catch(this.error);
-    }
-
-    // Charging
-    if (filled(data.isCharging)) {
-      this.setCapabilityValue('charging', data.isCharging).catch(this.error);
-    }
-  }
-
-  // Set store values
-  async setStore(data) {
-    if ('connectedToId' in data) {
-      this.setStoreValue('connected_via_bridge', filled(data.connectedToId)).catch(this.error);
-    }
-
-    if (blank(data.deviceSettings)) return;
-    if (blank(data.deviceSettings.pullSpringEnabled)) return;
-
-    const { pullSpringEnabled } = data.deviceSettings;
-
-    // Set store values
-    this.setStoreValue('pull_spring_enabled', pullSpringEnabled).catch(this.error);
-
-    // Remove or add "open" capability
-    this.toggleOpenCapability(pullSpringEnabled);
-  }
-
   // Settings changed
   async onSettings({ oldSettings, newSettings, changedKeys }) {
+    this.log('Updating settings...');
+
     const settings = {};
 
     // Check availability
@@ -172,85 +68,92 @@ class LockDevice extends Device {
     if (filled(settings)) {
       const tedeeId = this.getSetting('tedee_id');
 
-      await this.oAuth2Client.updateSettings('lock', tedeeId, settings);
+      this.log('Update settings:', JSON.stringify(settings));
 
-      this.log(`Lock settings ${tedeeId} updated successfully!`);
+      await this.oAuth2Client.updateSettings('lock', tedeeId, settings);
     }
   }
 
   /*
-  | API commands
+  | Synchronization functions
   */
 
-  // Lock action
-  async lock() {
-    this.log('----- Locking lock -----');
-
-    // Check availability
-    if (!this.getAvailable()) return;
-
-    // Get and validate state
-    const state = await this.getState();
-
-    // Lock is already locked
-    if (state === LockState.Locked) {
-      this.log('Lock is already locked');
-
-      return;
+  // Handle sync data
+  async handleSyncData(data, trigger) {
+    try {
+      await this.setStore(data);
+      await super.handleSyncData(data, trigger);
+    } catch (err) {
+      this.error(err.message);
+      this.setUnavailable(err.message).catch(this.error);
+    } finally {
+      data = null;
     }
-
-    // Make sure the lock is in a valid state to lock
-    if (state !== LockState.Unlocked && state !== LockState.SemiLocked) {
-      await this.throwError(`Not ready, currently ${state}`, 'errors.notReadyToLock');
-    }
-
-    // Send lock command to tedee API
-    await this.oAuth2Client.lock(this.getSetting('tedee_id'));
   }
 
-  // Open action
-  async open() {
-    this.log('----- Opening lock -----');
+  // Set availability
+  async setAvailability(data) {
+    // Disconnected
+    if (filled(data.isConnected) && !data.isConnected) {
+      if (this.getAvailable()) {
+        this.log('[Availability] Disconnected');
+      }
 
-    // Check availability
-    if (!this.getAvailable()) return;
-
-    // Check if pull spring is enabled
-    if (!this.hasCapability('open')) {
-      await this.throwError('Open capability not found', 'errors.pullSpringDisabled');
+      throw new Error(this.homey.__('state.disconnected'));
     }
 
-    // Validate state
-    await this.getState();
+    if (blank(data.state)) return;
 
-    // Send open command to tedee API
-    await this.oAuth2Client.unlock(this.getSetting('tedee_id'), UnlockMode.UnlockOrPullSpring);
+    if (data.state === LockState.Uncalibrated) {
+      throw new Error(this.homey.__('state.uncalibrated'));
+    }
+
+    if (data.state === LockState.Calibrating) {
+      throw new Error(this.homey.__('state.calibrating'));
+    }
+
+    if (data.state === LockState.Unknown) {
+      throw new Error(this.homey.__('state.unknown'));
+    }
+
+    if (data.state === LockState.Updating) {
+      throw new Error(this.homey.__('state.updating'));
+    }
+
+    this.setCapabilityValue('locked', data.state === LockState.Locked).catch(this.error);
   }
 
-  // Unlock action
-  async unlock() {
-    this.log('----- Unlocking lock -----');
+  // Set capabilities
+  async setCapabilities(data) {
+    await super.setCapabilities(data);
 
-    // Check availability
-    if (!this.getAvailable()) return;
-
-    // Get and validate state
-    const state = await this.getState();
-
-    // Lock is already unlocked
-    if (state === LockState.Unlocked) {
-      this.log('Lock is already unlocked');
-
-      return;
+    // Battery level
+    if (this.hasCapability('measure_battery') && filled(data.batteryLevel)) {
+      this.setCapabilityValue('measure_battery', data.batteryLevel).catch(this.error);
     }
 
-    // Make sure the lock is in a valid state
-    if (state !== LockState.Locked && state !== LockState.SemiLocked) {
-      await this.throwError(`Not ready to unlock, currently ${LockStateNames[state]} (${state})`, 'errors.notReadyToUnlock');
+    // Charging
+    if (this.hasCapability('charging') && filled(data.isCharging)) {
+      this.setCapabilityValue('charging', data.isCharging).catch(this.error);
+    }
+  }
+
+  // Set store values
+  async setStore(data) {
+    if ('connectedToId' in data) {
+      this.setStoreValue('connected_via_bridge', filled(data.connectedToId)).catch(this.error);
     }
 
-    // Send unlock command to tedee API
-    await this.oAuth2Client.unlock(this.getSetting('tedee_id'));
+    if (blank(data.deviceSettings)) return;
+    if (blank(data.deviceSettings.pullSpringEnabled)) return;
+
+    const { pullSpringEnabled } = data.deviceSettings;
+
+    // Set store values
+    this.setStoreValue('pull_spring_enabled', pullSpringEnabled).catch(this.error);
+
+    // Remove or add "open" capability
+    this.toggleOpenCapability(pullSpringEnabled);
   }
 
   /*
@@ -280,6 +183,78 @@ class LockDevice extends Device {
   }
 
   /*
+  | API commands
+  */
+
+  // Lock action
+  async lock() {
+    this.log('Locking...');
+
+    // Check availability
+    if (!this.getAvailable()) return;
+
+    // Get and validate state
+    const state = await this.getState();
+
+    // Lock is already locked
+    if (state === LockState.Locked) {
+      this.log('Lock is already locked');
+
+      return;
+    }
+
+    // Make sure the lock is in a valid state to lock
+    if (state !== LockState.Unlocked && state !== LockState.SemiLocked) {
+      await this.throwError(`Not ready, currently ${state}`, 'errors.notReadyToLock');
+    }
+
+    // Send lock command to tedee API
+    await this.oAuth2Client.lock(this.getSetting('tedee_id'));
+  }
+
+  // Open action
+  async open() {
+    this.log('Opening...');
+
+    // Check availability
+    if (!this.getAvailable()) return;
+
+    // Check if pull spring is enabled
+    if (!this.hasCapability('open')) {
+      await this.throwError('Open capability not found', 'errors.pullSpringDisabled');
+    }
+
+    // Send open command to tedee API
+    await this.oAuth2Client.unlock(this.getSetting('tedee_id'), UnlockMode.UnlockOrPullSpring);
+  }
+
+  // Unlock action
+  async unlock() {
+    this.log('Unlocking...');
+
+    // Check availability
+    if (!this.getAvailable()) return;
+
+    // Get and validate state
+    const state = await this.getState();
+
+    // Lock is already unlocked
+    if (state === LockState.Unlocked) {
+      this.log('Lock is already unlocked');
+
+      return;
+    }
+
+    // Make sure the lock is in a valid state
+    if (state !== LockState.Locked && state !== LockState.SemiLocked) {
+      await this.throwError(`Not ready to unlock, currently ${LockStateNames[state]} (${state})`, 'errors.notReadyToUnlock');
+    }
+
+    // Send unlock command to tedee API
+    await this.oAuth2Client.unlock(this.getSetting('tedee_id'));
+  }
+
+  /*
   | Listener functions
   */
 
@@ -292,6 +267,36 @@ class LockDevice extends Device {
   /*
   | Support functions
   */
+
+  // Returns settings from given data
+  getSettingsData(data) {
+    const settings = {};
+
+    // Set connected status
+    if (filled(data.isConnected)) {
+      settings.status = data.isConnected
+        ? this.homey.__('settings.connected')
+        : this.homey.__('settings.disconnected');
+
+      if (this.getStoreValue('connected_via_bridge') && data.isConnected) {
+        settings.status = this.homey.__('settings.connectedViaBridge');
+      }
+    }
+
+    if (blank(data.deviceSettings)) {
+      return settings;
+    }
+
+    const device = data.deviceSettings;
+
+    settings.auto_lock_enabled = device.autoLockEnabled || false;
+    settings.button_lock_enabled = device.buttonLockEnabled || false;
+    settings.button_unlock_enabled = device.buttonUnlockEnabled || false;
+    settings.postponed_lock_enabled = device.postponedLockEnabled || false;
+    settings.postponed_lock_delay = device.postponedLockDelay || 10;
+
+    return settings;
+  }
 
   // Validate and return state
   async getState() {
@@ -322,18 +327,18 @@ class LockDevice extends Device {
     }
   }
 
-  // Trigger opened capability
-  async triggerOpened() {
-    const device = this;
+  // Trigger flows
+  async triggerFlows(data) {
+    let device;
 
-    await this.driver.triggerOpened(device);
-  }
+    // Trigger opened
+    if (filled(data.state) && data.state === LockState.Pulled) {
+      device = this;
 
-  // Log and throw error
-  async throwError(message, locale) {
-    this.error(message);
+      await this.driver.triggerOpened(device);
+    }
 
-    throw new Error(this.homey.__(locale));
+    device = null;
   }
 
 }

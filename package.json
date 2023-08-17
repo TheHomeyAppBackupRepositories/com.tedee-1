@@ -1,6 +1,6 @@
 {
   "name": "com.tedee",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "homepage": "https://github.com/edwinvdpol/com.tedee#readme",
   "license": "SEE LICENSE",
   "author": {
@@ -10,7 +10,7 @@
   "funding": [
     {
       "type": "individual",
-      "url": "https://www.paypal.me/edwinvdpol"
+      "url": "https://paypal.me/edwinvdpol"
     }
   ],
   "main": "app.js",
@@ -26,7 +26,7 @@
     "homey-oauth2app": "^3.5.3"
   },
   "devDependencies": {
-    "@types/homey": "npm:homey-apps-sdk-v3-types@^0.3.3",
+    "@types/homey": "npm:homey-apps-sdk-v3-types@^0.3.4",
     "eslint-config-athom": "^3.1.1"
   }
 }
