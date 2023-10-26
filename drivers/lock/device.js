@@ -20,7 +20,7 @@ class LockDevice extends Device {
 
   // Settings changed
   async onSettings({ oldSettings, newSettings, changedKeys }) {
-    this.log('Updating settings...');
+    this.log('[Settings] Updating');
 
     const settings = {};
 
@@ -68,9 +68,9 @@ class LockDevice extends Device {
     if (filled(settings)) {
       const tedeeId = this.getSetting('tedee_id');
 
-      this.log('Update settings:', JSON.stringify(settings));
-
       await this.oAuth2Client.updateSettings('lock', tedeeId, settings);
+
+      this.log('[Settings] Updated');
     }
   }
 
@@ -188,7 +188,7 @@ class LockDevice extends Device {
 
   // Lock action
   async lock() {
-    this.log('Locking...');
+    this.log('Locking');
 
     // Check availability
     if (!this.getAvailable()) return;
@@ -214,7 +214,7 @@ class LockDevice extends Device {
 
   // Open action
   async open() {
-    this.log('Opening...');
+    this.log('Opening');
 
     // Check availability
     if (!this.getAvailable()) return;
@@ -230,7 +230,7 @@ class LockDevice extends Device {
 
   // Unlock action
   async unlock() {
-    this.log('Unlocking...');
+    this.log('Unlocking');
 
     // Check availability
     if (!this.getAvailable()) return;
@@ -300,7 +300,7 @@ class LockDevice extends Device {
 
   // Validate and return state
   async getState() {
-    this.log('Fetching state...');
+    this.log('Fetch state');
 
     // Fetch current lock state from tedee API
     const state = await this.oAuth2Client.getLockState(this.getSetting('tedee_id'));
@@ -329,15 +329,27 @@ class LockDevice extends Device {
 
   // Trigger flows
   async triggerFlows(data) {
-    let device;
+    if (blank(data.state)) return;
 
-    // Trigger opened
-    if (filled(data.state) && data.state === LockState.Pulled) {
-      device = this;
+    let state = this.getStoreValue('state');
 
-      await this.driver.triggerOpened(device);
+    // State not changed
+    if (data.state === state) return;
+
+    // Update store value
+    this.setStoreValue('state', data.state).catch(this.error);
+
+    // Initial state was empty
+    if (blank(state)) return;
+
+    let device = this;
+
+    // Trigger pulled
+    if (data.state === LockState.Pulled) {
+      await this.driver.triggerPulled(device);
     }
 
+    state = null;
     device = null;
   }
 
